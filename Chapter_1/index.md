@@ -177,3 +177,327 @@ isShippingChangeable() 메서드가 Order 클래스에 정의되어 있으며,
 도메인 로직이 흩어져 있는 상황이므로, 상태에 따라 동작하는 로직은 상태 자체에 포함시키는 것이 더 적절합니다.
 
 또한, 상태에 따른 변경 규칙을 OrderState에 두지 않고 Order에서 처리하는 것은 객체가 자신의 상태를 알지 못하는 것처럼 보입니다.
+
+
+----------------------
+
+## 1.5 도메인 모델 도출
+
+도메인을 모델링할 때 기본이 되는 작업은 모델을 구성하는 핵심 구성요소 규칙 기능을 찾는 것이다. 이 과정은 요구사항에서 출발한다.
+
+주문 도메인과 관련된 몇 가지 요구사항을 본다.
+
+- 최소 한 종류 이상의 상품을 주문해야 한다.
+- 한 상품을 한 개 이상 주문할 수 있다.
+- 총 주문 금액은 각 상품의 구매 가격 합을 모두 더한 금액이다.
+- 각 상품의 구매 가격 합은 상품 가격에 구매 개수를 곱한 값이다.
+- 주문할 때 배송지 정보를 반드시 지정해야 한다.
+- 배송지 정보는 받는 사람 이름, 전화번호, 주소로 구성된다.
+- 출고를 하면 배송지를 변경할 수 없다.
+- 출고 전에 배송을 취소할 수 있다.
+- 고객이 결제를 완료하기 전에는 상품을 준비하지 않는다.
+
+주문은 '출고 상태로 변경', '배송지 정보 변경', '주문 취소', '결제 완료' 기능을 제공한다.
+
+Order 의 관련 기능을 메서드로 추가할 수 있다.
+
+```java
+public class Order {
+    public void changeShipped() {...}
+
+    public void changeShippingInfo(ShippingInfo shippingInfo) {...}
+
+    public void cancel() {...}
+
+    public void completePayment() {...}
+}
+```
+
+또한 주문 항목이 어떤 데이터로 구성되었는지 알려준다.
+
+- 한 상품을 한 개 이상 주문할 수 있다.
+- 각 상품의 구매 가격 합은 상품 가격에 구매 개수를 곱한 값이다.
+
+주문 항목을 표현하는 OrderLine은 적어도 주문할 상품, 가격, 구매 개수를 포함해야 한다. 추가로 각 구매 항목의 구마 가격도 제공해야 한다.
+
+```java
+public class OrderLine {
+    private Product product;
+    private int price;
+    private int quantity;
+    private int amounts;
+
+    public OrderLine(Product product, int price, int quantity) {
+        this.product = product;
+        this.price = price;
+        this.quantity = quantity;
+        this.amounts = calculateAmounts();
+    }
+
+    private int calculateAmounts() {
+        return price * quantity;
+    }
+    
+    public int getAmounts() {...}
+}
+```
+
+OrderLine 은 한 상품을 얼마에 몇 개 살지를 담고있고 calculateAmounts 메서드로 구매 가격을 구하는 로직을 구현하고 있다.
+
+다음은 Order 와 OrderLine 과의 관계를 알려준다.
+
+- 최소 한 종류 이상의 상품을 주문해야 한다.
+- 총 주문 금액은 각 상품의 구매 가격 합을 모두 더한 금액이다.
+
+한 종류 이상의 상품을 주문할 수 있으므로 Order는 최소 한 개 이상의 OrderLine 을 포함해야 한다.
+
+```java
+public class Order {
+    private List<OrderLine> orderLines;
+    private Money totalAmounts;
+
+    public Order(List<OrderLine> orderLines) {
+        setOrderLines(orderLines);
+    }
+
+    private void setOrderLines(List<OrderLine> orderLines) {
+        verifyAtLeastOneOrMoreOrderLines(orderLines);
+        this.orderLines = orderLines;
+        calculateTotalAmounts();
+    }
+
+    private void verifyAtLeastOneOrMoreOrderLines(List<OrderLine> orderLines) {
+        if (orderLines == null || orderLines.isEmpty()) {
+            throw new IllegalArgumentException("no Orders");
+        }
+    }
+
+    private void calculateTotalAmounts() {
+        int sum = orderLines.stream().mapToInt(x -> x.getAmounts()).sum();
+        this.totalAmounts = new Money(sum);
+    }
+}
+```
+
+Order 는 한 개 이상의 OrderLine 을 가질 수 있으므로 Order 를 생성할 떄 OrderLine 목록을 List 로 전달.
+
+setOrderLines 메서드로 요구사항에 정의한 제약 조건을 검사한다.
+
+배송지 정보는 이름, 전화번호, 주소 데이터를 가지므로 ShippingInfo 클래스를 다음과 같이 정의할 수 있다.
+
+```java
+public class ShippingInfo {
+    private String receiverName;
+    private String receiverPhoneNumber;
+    private String shippingAddress1;
+    private String shippingAddress2;
+    private String shippingZipcode;
+}
+```
+
+주문할 때 배송지 정보를 반드시 지정해야 한다라는 내용이 있으므로 Order 를 생성할 때 ShippingInfo 도 함께 전달해야 한다.
+
+```java
+public class Order {
+    private List<OrderLine> orderLines;
+    private Money totalAmounts;
+    private ShippingInfo shippingInfo;
+
+    public Order(List<OrderLine> orderLines, ShippingInfo shippingInfo) {
+        setOrderLines(orderLines);
+        setShippingInfo(shippingInfo);
+    }
+
+    private void setOrderLines(List<OrderLine> orderLines) {
+        verifyAtLeastOneOrMoreOrderLines(orderLines);
+        this.orderLines = orderLines;
+        calculateTotalAmounts();
+    }
+    
+    private void setShippingInfo(ShippingInfo shippingInfo) {
+        if (shippingInfo == null) {
+            throw new IllegalArgumentException("no info");
+        }
+        this.shippingInfo = shippingInfo;
+    }
+
+    private void verifyAtLeastOneOrMoreOrderLines(List<OrderLine> orderLines) {
+        if (orderLines == null || orderLines.isEmpty()) {
+            throw new IllegalArgumentException("no Orders");
+        }
+    }
+
+    private void calculateTotalAmounts() {
+        int sum = orderLines.stream().mapToInt(x -> x.getAmounts()).sum();
+        this.totalAmounts = new Money(sum);
+    }
+}
+```
+
+도메인을 구현하다 보면 특정 조건이나 상태에 따라 제약이나 규칙이 달리 적용되는 경우가 많다. 주문 요구사항에서는 다음 내용이 제약과 규칙에 해당한다.
+
+- 출고를 하면 배송지 정보를 변경할 수 없다.
+- 출고 전에 주문을 취소 할 수 있다.
+
+이 요구사항은 출고 상태가 되기 전과 후의 제약사항을 기술한다. 출고 상태에 따라 배송지 정보 변경 기능과 취소 기능은 다른 제약을 갖는다.
+
+또한 이 요구사항도 상태와 관련이 있다.
+
+- 고객이 결제를 완료하기 전에는 상품을 준비하지 않는다.
+
+```java
+public enum OrderState {
+    PREPARING, PAYMENT_WAITING, SHIPPED, DELIVERING, DELIVERY_COMPLETED, CANCELED
+}
+```
+
+```java
+public class Order {
+    private OrderState state;
+
+    public void changeShippingInfo(ShippingInfo newShippingInfo) {
+        verityNotYetShipped();
+        setShippingInfo(newShippingInfo);
+    }
+
+    public void cancel() {
+        verityNotYetShipped();
+        this.state = OrderState.CANCELED;
+    }
+
+    private void verityNotYetShipped() {
+        if (state != OrderState.PAYMENT_WATING && state != Order.PREPARING) {
+            throw new IllegalStateException("aleady shipped");
+        }
+    }
+
+}
+```
+
+-------------------------------
+
+## 1.6 엔티티와 벨류
+
+도출한 모델은 엔티티와 벨류로 구분할 수 있다.
+
+엔티티와 밸류를 제대로 구분하여 도메인을 올바르게 설계하고 구현할 수 있기 떄문에 이 둘의 차이를 명확하게 이해하는 것은
+도메인을 구현하는데 있어 중요하다.
+
+### 1.6.1 엔티티
+
+엔티티의 가장 큰 특징은 식별자를 가진다는 것이다. 식별자는 엔티티 객체마다 고유해서 각 엔티티는 서로 다른 식별자를 갖는다.
+
+예를 들어 주문 도메인에서 각 주문은 주문번호를 가지고 있는데 이 주문번호는 각 주문마다 서로 다르다. 따라서 주문번호가 주문의 식별자가 된다.
+
+```java
+public class Order {
+    private String orderNumber;
+}
+```
+
+주문에서 배송지 주소가 바뀌거나 상태가 바뀌더라도 주문번호는 불변한다.
+엔티티의 식별자는 고유하기 떄문에 두 엔티티 객체의 식별자가 같으면 두 엔티티는 같다고 판단할 수 있다.
+
+### 1.6.3 밸류 타입
+
+ShippingInfo 클래스는 받는 사람과 주소에 대한 데이터를 갖고 있다.
+
+```java
+public class ShippingInfo {
+    private String receiverName;
+    private String receiverPhoneNumber;
+
+    private String shippingAddress1;
+    private String shippingAddress2;
+    private String shippingZipcode;
+}
+```
+
+receiverName, receiverPhoneNumber 필드는 서로 다른 두 데이터를 담고 있지만 개념적으로 받는 사람을 의미한다.
+
+즉 두 필드는 실제로 하나의 개념을 표현중이다.
+
+받는 사람을 위한 밸류 타입인 Receiver 라는 값을 만들수 도 있다는 것이다.
+
+밸류 타입의 또 다른 장점은 밸류 타입을 위한 기능을 추가할 수 있다는 점이다.
+
+```java
+public class Money {
+    private int value;
+    
+    public Money add(Money money) {
+        return new Money(this.value + money.value);
+    }
+    
+    public Money multipy(int multiplier) {
+        return new Money(value * multiplier);
+    }
+}
+```
+
+Money 처럼 데이터 변경 기능을 제공하지 않는 타입을 불변이라 한다.
+
+### 1.6.4 엔티티 식별자와 밸류 타입
+
+엔티티 식별자의 실제 데이터는 String 과 같은 문자열로 구성된 경우가 많다. 신요아드 번호도 16개의 숫자로 구성된 문자열이며
+많은 온라인 서비스에서 회원을 구분할 때 사용하는 이메일 주소도 문자열이다.
+
+단순 숫자가 아닌 도메인의 돈을 의미하는 것처럼 이런 식별자는 단순한 문자열이 아니라 도메인에서 특별한 의미를 지니는 경우가 많기 떄문에
+
+식별자를 위한 밸류 타입을 사용해서 의미가 잘 드러나도록 할 수 있다.
+
+Order 의 식별자 타입으로 String 대신 OrderNo 밸류 타입을 사용하면 타입을 통해 해당 필드가 주문번호라는 것을 알 수 있다.
+
+```java
+public class Order {
+    private OrderNo id;
+
+    public OrderNo getId() {
+        return id;
+    }
+}
+```
+
+이렇게 식별자를 밸류타입으로 만들면 어떤 장점이 있는가?
+
+1. 의미적 명확성을 가지게 됩니다.
+2. 불변성과 일관성을 가지게 됩니다.
+3. 식별자를 Value Object로 관리함으로써, 식별자 생성 규칙이나 검증 로직을 Value Object 안에 캡슐화할 수 있습니다.
+4. 타입 안전성을 가지게 됩니다.
+
+### 1.6.5 도메인 모델에 set 메서드 넣지 않기
+
+get / set 메서드를 습관적으로 추가할 때가 있는데. 도메인 모델에서는 무조건 추가하는 것은 좋지 않은 버릇이다.
+
+```java
+public class Order {
+    public void setShippingInfo(ShippingInfo newShipping) { ... }
+    public void setOrderState(OrderState state) { ... }
+}
+```
+
+setShippingInfo 메서드는 단순히 배송지 값을 설정하는 것을 의미한다.
+
+completePayment 는 결제를 완료했다는 의미를 갖는 반면에 setOrderState 는 단순히 주문 상태 값을 변경하는 것만 의미한다.
+
+결제 완료 처리를 구현하니까 completePayment 로 구현하는 것이 자연스럽다.
+
+setOrderState 는 단순히 상태 값만 변경할지 아니면 상태값에 따라 다른 처리를 위한 코드를 함께 구현할지 애매하다.
+
+### 요약. 특별한 이유 없다면 불변 타입의 장점을 살릴 수 있도록 밸류 타입은 불변으로 구현해야 한다.
+
+----------------------------
+
+## 1.7 도메인 용어와 유비쿼터스 언어
+
+코드를 작성할 때 도메인에서 사용하는 용어는 매우 중요하다. 도메인에서 사용하는 용어를 코드에 반영하지 않으면
+
+그 코드는 개발자에게 코드의 의미를 해석해야 하는 부담을 준다.
+
+최대한 도메인 용어를 사용해서 도메인 규칙을 코드로 작성하게 되므로 버그도 줄어들게 된다.
+
+에릭 에반스는 도메인 주도 설계에서 언어의 중요함을 강조하기 위해 유비쿼터스 언어라는 용어를 사용했다.
+
+전문가, 관계자, 개발자가 도메인과 관련된 공통의 언어를 만들고 이를 대화, 문서, 도메인 모델, 코드, 테스트 등 모든 곳에서
+같은 용어를 사용하여 불필요한 해석 과정을 줄일 수 있다고 한다.
+
